@@ -13,10 +13,11 @@ class FilesystemApiProvider
     private $path;
 
     /** @var array */
-    private $latestVersions = [];
+    private $manifest;
 
     /**
-     * @param string $path     Path to the service description files on disk.
+     * @param string $path Path to the service description files on disk.
+     *
      * @throws \InvalidArgumentException if the path is not found.
      */
     public function __construct($path)
@@ -26,6 +27,8 @@ class FilesystemApiProvider
         if (!is_dir($path)) {
             throw new \InvalidArgumentException("Path not found: $path");
         }
+
+        $this->manifest = include "{$this->path}/api-version-manifest.php";
     }
 
     /**
@@ -38,13 +41,19 @@ class FilesystemApiProvider
      * @param string $version Version of the document to retrieve.
      *
      * @return array
-     * @throws \InvalidArgumentException when the type is unknown.
+     * @throws \InvalidArgumentException if the is invalid.
+     * @throws UnresolvedApiException if the service/version is not available.
      */
     public function __invoke($type, $service, $version)
     {
-        if ($version == 'latest') {
-            $version = $this->determineLatestVersion($service);
+        if (!isset($this->manifest[$service][$version])) {
+            throw new UnresolvedApiException(
+                "The {$service} service does "
+                . "not have a {$version} version available."
+            );
         }
+
+        $version = $this->manifest[$service][$version];
 
         switch ($type) {
             case 'api':
@@ -58,15 +67,20 @@ class FilesystemApiProvider
         }
     }
 
+    /**
+     * Retrieves a list of valid versions for this service.
+     *
+     * @param string $service Service name
+     *
+     * @return array
+     */
     public function getServiceVersions($service)
     {
-        $results = [];
-        $len = strlen($service) + 1;
-        foreach (glob("{$this->path}/{$service}-*.api.*") as $f) {
-            $results[] = substr(basename($f), $len, 10);
+        if (!isset($this->manifest[$service])) {
+            return [];
         }
 
-        return $results;
+        return array_values(array_unique($this->manifest[$service]));
     }
 
     /**
@@ -76,7 +90,6 @@ class FilesystemApiProvider
     {
         // First check for PHP files, then fall back to JSON.
         $path = "{$this->path}/{$service}-{$version}.{$type}.php";
-
         if (file_exists($path)) {
             return require $path;
         }
@@ -87,20 +100,5 @@ class FilesystemApiProvider
         }
 
         throw new UnresolvedApiException("Cannot find file: $path");
-    }
-
-    private function determineLatestVersion($service)
-    {
-        if (!isset($this->latestVersions[$service])) {
-            if ($versions = $this->getServiceVersions($service)) {
-                rsort($versions);
-                $this->latestVersions[$service] = $versions[0];
-            } else {
-                throw new UnresolvedApiException("There are no versions of the "
-                    . "\"$service\" service available.");
-            }
-        }
-
-        return $this->latestVersions[$service];
     }
 }

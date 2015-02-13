@@ -2,6 +2,7 @@
 namespace Aws\Test\Api;
 
 use Aws\Api\FilesystemApiProvider;
+use Aws\Exception\UnresolvedApiException;
 
 /**
  * @covers Aws\Api\FilesystemApiProvider
@@ -18,66 +19,93 @@ class FilesystemApiProviderTest extends \PHPUnit_Framework_TestCase
 
     public function testPathAndSuffixSetCorrectly()
     {
-        $p1 = new FilesystemApiProvider(__DIR__ . '/');
-        $this->assertEquals(__DIR__, $this->readAttribute($p1, 'path'));
+        $dir = __DIR__ . '/api_provider_fixtures';
+        $p1 = new FilesystemApiProvider($dir . '/');
+        $this->assertEquals($dir, $this->readAttribute($p1, 'path'));
     }
 
     public function testEnsuresValidJson()
     {
         $path = sys_get_temp_dir() . '/invalid-2010-12-05.api.json';
+        $manifest = sys_get_temp_dir() . '/api-version-manifest.php';
         file_put_contents($path, 'foo, bar');
+        file_put_contents($manifest, '<?php return [];');
         $p = new FilesystemApiProvider(sys_get_temp_dir());
         try {
-            call_user_func($p, 'api', 'invalid', '2010-12-05');
+            $p('api', 'invalid', '2010-12-05');
             $this->fail('Did not throw');
-        } catch (\InvalidArgumentException $e) {
+        } catch (\Exception $e) {
+            $this->assertInstanceOf(UnresolvedApiException::class, $e);
+        } finally {
             unlink($path);
+            unlink($manifest);
         }
     }
 
     public function testCanLoadPhpFiles()
     {
         $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
-        $this->assertEquals(
-            [],
-            $p('api', 'dynamodb', '2010-02-04')
-        );
+        $this->assertEquals([], $p('api', 'dynamodb', '2010-02-04'));
     }
 
     public function testReturnsLatestServiceData()
     {
         $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
-        $this->assertEquals(
-            ['foo' => 'bar'],
-            call_user_func($p, 'api', 'dynamodb', 'latest')
-        );
+        $this->assertEquals(['foo' => 'bar'], $p('api', 'dynamodb', 'latest'));
+    }
+
+    /**
+     * @expectedExceptionMessage The dodo service does not have a latest version available.
+     */
+    public function testThrowsWhenNoLatestVersionIsAvailable()
+    {
+        $this->setExpectedException(UnresolvedApiException::class);
+        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
+        $p('api', 'dodo', 'latest');
+    }
+
+    public function testReturnsPaginatorConfigsForLatestCompatibleVersion()
+    {
+        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
+        $result = $p('paginator', 'dynamodb', 'latest');
+        $this->assertEquals(['abc' => '123'], $result);
+        $result = $p('paginator', 'dynamodb', '2011-12-05');
+        $this->assertEquals(['abc' => '123'], $result);
+    }
+
+    public function testReturnsWaiterConfigsForLatestCompatibleVersion()
+    {
+        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
+        $result = $p('waiter', 'dynamodb', 'latest');
+        $this->assertEquals(['abc' => '456'], $result);
+        $result = $p('waiter', 'dynamodb', '2011-12-05');
+        $this->assertEquals(['abc' => '456'], $result);
+    }
+
+    /**
+     * @expectedException \InvalidArgumentException
+     * @expectedExceptionMessage Unknown type: foo
+     */
+    public function testThrowsOnBadType()
+    {
+        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
+        $p('foo', 's3', 'latest');
+    }
+
+    public function testCanGetServiceVersions()
+    {
+        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
+        $this->assertEquals(['2012-08-10', '2010-02-04'], $p->getServiceVersions('dynamodb'));
+        $this->assertEquals([], $p->getServiceVersions('foo'));
     }
 
     /**
      * @expectedException \RuntimeException
-     * @expectedExceptionMessage There are no versions of the "dodo" service available
+     * @expectedExceptionMessage Cannot find file
      */
-    public function testThrowsWhenNoLatestVersionIsAvailable()
+    public function testThrowsWhenLoadingMissingFile()
     {
         $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
-        call_user_func($p, 'api', 'dodo', 'latest');
-    }
-
-    public function testReturnsPaginatorConfigs()
-    {
-        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
-        $result = call_user_func($p, 'paginator', 'dynamodb', 'latest');
-        $this->assertEquals(['abc' => '123'], $result);
-        $result = call_user_func($p, 'paginator', 'dynamodb', '2011-12-05');
-        $this->assertEquals([], $result);
-    }
-
-    public function testReturnsWaiterConfigs()
-    {
-        $p = new FilesystemApiProvider(__DIR__ . '/api_provider_fixtures');
-        $result = call_user_func($p, 'waiter', 'dynamodb', 'latest');
-        $this->assertEquals(['abc' => '456'], $result);
-        $result = call_user_func($p, 'waiter', 'dynamodb', '2011-12-05');
-        $this->assertEquals([], $result);
+        $p('api', 'nofile', 'latest');
     }
 }
