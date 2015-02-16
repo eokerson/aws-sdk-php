@@ -3,6 +3,7 @@ namespace Aws;
 
 use GuzzleHttp\Event\EmitterInterface;
 use InvalidArgumentException as IAE;
+use Aws\Api\ApiProvider;
 use Aws\Api\Service;
 use Aws\Api\Validator;
 use Aws\Credentials\Credentials;
@@ -10,7 +11,6 @@ use Aws\Credentials\CredentialsInterface;
 use Aws\Credentials\NullCredentials;
 use Aws\Retry\ThrottlingFilter;
 use Aws\Subscriber\Validation;
-use Aws\Api\FilesystemApiProvider;
 use Aws\Signature\SignatureProvider;
 use Aws\Endpoint\EndpointProvider;
 use Aws\Credentials\CredentialProvider;
@@ -425,7 +425,7 @@ class ClientResolver
 
     public static function _default_api_provider()
     {
-        return new FilesystemApiProvider(__DIR__ . '/data');
+        return ApiProvider::defaultProvider();
     }
 
     public static function _default_client (array &$args)
@@ -466,10 +466,8 @@ class ClientResolver
 
     public static function _missing_version(array $args)
     {
-        $dir = __DIR__ . '/data';
-        $args['service'] = isset($args['service']) ? $args['service'] : '';
-        $provider = new FilesystemApiProvider($dir);
-        $versions = $provider->getServiceVersions($args['service']);
+        $service = isset($args['service']) ? $args['service'] : '';
+        $versions = ApiProvider::getServiceVersions($service);
         $versions = implode("\n", array_map(function ($v) {
             return "* \"$v\"";
         }, $versions)) ?: '* (none found)';
@@ -480,14 +478,11 @@ ensures that your code will not be affected by a breaking change made to the
 service. For example, when using Amazon S3, you can lock your API version to
 "2006-03-01".
 
-Your build of the SDK has the following version(s) of "{$args['service']}":
-{$versions}
+Your build of the SDK has the following version(s) of "{$service}": {$versions}
 
 You may provide "latest" to the "version" configuration value to utilize the
-most recent available API version that your client's API provider can find
-(the default api_provider will scan the {$dir}
-directory for *.api.php and *.api.json files). Note: Using 'latest' in a
-production application is not recommended.
+most recent available API version that your client's API provider can find.
+Note: Using 'latest' in a production application is not recommended.
 
 A list of available API versions can be found on each client's API documentation
 page: http://docs.aws.amazon.com/aws-sdk-php/v3/api/index.html. If you are
