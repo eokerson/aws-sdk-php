@@ -9,6 +9,19 @@ use Aws\Exception\UnresolvedApiException;
  */
 class ApiProviderTest extends \PHPUnit_Framework_TestCase
 {
+    /**
+     * @return ApiProvider;
+     */
+    private function getTestApiProvider($useManifest = true)
+    {
+        $dir = __DIR__ . '/api_provider_fixtures';
+        $manifest = include $dir . '/api-version-manifest.php';
+
+        return $useManifest
+            ? ApiProvider::manifest($dir, $manifest)
+            : ApiProvider::filesystem($dir);
+    }
+
     public function testCanResolveProvider()
     {
         $p = function ($a, $b, $c) {return [];};
@@ -21,27 +34,35 @@ class ApiProviderTest extends \PHPUnit_Framework_TestCase
 
     public function testCanGetServiceVersions()
     {
-        $this->assertEquals(['2012-08-10'], ApiProvider::getServiceVersions('dynamodb'));
-        $this->assertEquals([], ApiProvider::getServiceVersions('foo'));
+        $mp = $this->getTestApiProvider();
+        $this->assertEquals(
+            ['2012-08-10', '2010-02-04'],
+            $mp->getVersions('dynamodb')
+        );
+        $this->assertEquals([], $mp->getVersions('foo'));
+
+        $fp = $this->getTestApiProvider(false);
+        $this->assertEquals(
+            ['2012-08-10', '2010-02-04'],
+            $fp->getVersions('dynamodb')
+        );
     }
 
     public function testCanGetDefaultProvider()
     {
         $p = ApiProvider::defaultProvider();
-        $r = new \ReflectionFunction($p);
-        $this->assertArrayHasKey('manifest', $r->getStaticVariables());
+        $this->assertArrayHasKey('s3', $this->readAttribute($p, 'versions'));
     }
 
     public function testManifestProviderReturnsNullForMissingService()
     {
-        $p = ApiProvider::manifest([]);
+        $p = $this->getTestApiProvider();
         $this->assertNull($p('api', 'foo', '2015-02-02'));
     }
 
     public function testManifestProviderCanLoadData()
     {
-        $dir = __DIR__ . '/api_provider_fixtures';
-        $p = ApiProvider::manifest(include $dir . '/api-version-manifest.php', $dir);
+        $p = $this->getTestApiProvider();
         $data = $p('api', 'dynamodb', 'latest');
         $this->assertInternalType('array', $data);
         $this->assertArrayHasKey('foo', $data);
@@ -72,14 +93,20 @@ class ApiProviderTest extends \PHPUnit_Framework_TestCase
 
     public function testNullOnMissingFile()
     {
-        $p = ApiProvider::filesystem(sys_get_temp_dir());
-        $this->assertNull($p('api', 'nofile', '2010-02-04'));
+        $p = $this->getTestApiProvider();
+        $this->assertNull($p('api', 'nofile', 'latest'));
     }
 
     public function testReturnsLatestServiceData()
     {
         $p = ApiProvider::filesystem(__DIR__ . '/api_provider_fixtures');
         $this->assertEquals(['foo' => 'bar'], $p('api', 'dynamodb', 'latest'));
+    }
+
+    public function testCanLoadPhpFile()
+    {
+        $p = ApiProvider::filesystem(__DIR__ . '/api_provider_fixtures');
+        $this->assertEquals(['foo' => 'bar'], $p('api', 'dynamodb', '2010-02-04'));
     }
 
     public function testReturnsNullWhenNoLatestVersionIsAvailable()
@@ -90,8 +117,7 @@ class ApiProviderTest extends \PHPUnit_Framework_TestCase
 
     public function testReturnsPaginatorConfigsForLatestCompatibleVersion()
     {
-        $dir = __DIR__ . '/api_provider_fixtures';
-        $p = ApiProvider::manifest(include $dir . '/api-version-manifest.php', $dir);
+        $p = $this->getTestApiProvider();
         $result = $p('paginator', 'dynamodb', 'latest');
         $this->assertEquals(['abc' => '123'], $result);
         $result = $p('paginator', 'dynamodb', '2011-12-05');
@@ -100,21 +126,31 @@ class ApiProviderTest extends \PHPUnit_Framework_TestCase
 
     public function testReturnsWaiterConfigsForLatestCompatibleVersion()
     {
-        $dir = __DIR__ . '/api_provider_fixtures';
-        $p = ApiProvider::manifest(include $dir . '/api-version-manifest.php', $dir);
+        $p = $this->getTestApiProvider();
         $result = $p('waiter', 'dynamodb', 'latest');
         $this->assertEquals(['abc' => '456'], $result);
         $result = $p('waiter', 'dynamodb', '2011-12-05');
         $this->assertEquals(['abc' => '456'], $result);
     }
 
-    /**
-     * @expectedException \InvalidArgumentException
-     * @expectedExceptionMessage Unknown type: foo
-     */
     public function testThrowsOnBadType()
     {
-        $p = ApiProvider::defaultProvider();
-        $p('foo', 's3', 'latest');
+        $this->setExpectedException(UnresolvedApiException::class);
+        $p = $this->getTestApiProvider();
+        ApiProvider::resolve($p, 'foo', 's3', 'latest');
+    }
+
+    public function testThrowsOnBadService()
+    {
+        $this->setExpectedException(UnresolvedApiException::class);
+        $p = $this->getTestApiProvider();
+        ApiProvider::resolve($p, 'api', '', 'latest');
+    }
+
+    public function testThrowsOnBadVersion()
+    {
+        $this->setExpectedException(UnresolvedApiException::class);
+        $p = $this->getTestApiProvider();
+        ApiProvider::resolve($p, 'api', 'dynamodb', 'derp');
     }
 }

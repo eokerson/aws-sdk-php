@@ -87,7 +87,7 @@ class ClientResolver
             'valid'    => ['callable'],
             'doc'      => 'An optional PHP callable that accepts a type, service, and version argument, and returns an array of corresponding configuration data. The type value can be one of api, waiter, or paginator.',
             'fn'       => [__CLASS__, '_apply_api_provider'],
-            'default'  => [__CLASS__, '_default_api_provider'],
+            'default'  => [ApiProvider::class, 'defaultProvider'],
         ],
         'signature_version' => [
             'type'    => 'config',
@@ -423,11 +423,6 @@ class ClientResolver
         }
     }
 
-    public static function _default_api_provider()
-    {
-        return ApiProvider::defaultProvider();
-    }
-
     public static function _default_client (array &$args)
     {
         $clientArgs = [];
@@ -467,7 +462,7 @@ class ClientResolver
     public static function _missing_version(array $args)
     {
         $service = isset($args['service']) ? $args['service'] : '';
-        $versions = ApiProvider::getServiceVersions($service);
+        $versions = ApiProvider::defaultProvider()->getVersions($service);
         $versions = implode("\n", array_map(function ($v) {
             return "* \"$v\"";
         }, $versions)) ?: '* (none found)';
